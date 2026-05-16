@@ -1,0 +1,51 @@
+{
+  "name": "telegram-vscode-remote-control",
+  "displayName": "Telegram VSCode Remote Control",
+  "description": "允许通过Telegram机器人远程控制VS Code的扩展",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:telegram-remote.authenticate",
+    "onCommand:telegram-remote.executeTask",
+    "onCommand:telegram-remote.executeFile",
+    "onCommand:telegram-remote.showAuthCode"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "telegram-remote.authenticate",
+        "title": "Telegram Remote: Authenticate"
+      },
+      {
+        "command": "telegram-remote.executeTask",
+        "title": "Telegram Remote: Execute Task"
+      },
+      {
+        "command": "telegram-remote.executeFile",
+        "title": "Telegram Remote: Execute Selected File"
+      },
+      {
+        "command": "telegram-remote.showAuthCode",
+        "title": "Telegram Remote: Show Authentication Code"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "16.x",
+    "typescript": "^4.9.4"
+  },
+  "dependencies": {
+    "axios": "^1.4.0"
+  }
+}

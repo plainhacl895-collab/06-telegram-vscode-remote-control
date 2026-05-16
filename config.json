@@ -1,0 +1,43 @@
+{
+  "appName": "Telegram VSCode Remote Control",
+  "version": "1.0.0",
+  "description": "A system to control VS Code remotely through a Telegram bot",
+  "components": {
+    "botServer": {
+      "type": "express",
+      "port": 3000,
+      "webhookPath": "/webhook"
+    },
+    "vscodeExtension": {
+      "name": "telegram-vscode-remote-control",
+      "activationEvents": [
+        "onCommand:telegram-remote.authenticate",
+        "onCommand:telegram-remote.executeTask",
+        "onCommand:telegram-remote.executeFile",
+        "onCommand:telegram-remote.showAuthCode"
+      ]
+    }
+  },
+  "security": {
+    "authentication": {
+      "type": "jwt",
+      "tokenExpiry": "5m",
+      "algorithm": "HS256"
+    },
+    "authorization": {
+      "commandWhitelist": [
+        "/start",
+        "/help",
+        "/auth",
+        "/run",
+        "/list",
+        "/file",
+        "/task"
+      ]
+    }
+  },
+  "requirements": {
+    "nodeVersion": ">=16.0.0",
+    "vscodeVersion": ">=1.74.0"
+  }
+}
