@@ -1,293 +1,289 @@
-// bot-server/src/server.ts
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
+import { WebSocketServer, WebSocket } from 'ws';
 import axios from 'axios';
 import { TelegramMessage, CommandRequest, CommandResponse } from '../shared/types';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8776467958:AAFMgUZHUkFJpRYilBNIMv-xT6Q3K1v4gpY';
+const HTTP_PORT = process.env.PORT || 3000;
+const WS_PORT = process.env.WS_PORT || 3001;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+
+if (!TELEGRAM_BOT_TOKEN) {
+  console.error('错误: 请设置 TELEGRAM_BOT_TOKEN 环境变量 (在 bot-server/.env 文件中)');
+  process.exit(1);
+}
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
-// 存储已认证用户的会话
+// 跳过代理，直连 Telegram API
+const axiosInstance = axios.create({
+  proxy: false,
+});
+
 const authenticatedUsers = new Set<number>();
 
-// 验证命令白名单
-const allowedCommands = [
-  '/start',
-  '/help',
-  '/auth',
-  '/run',
-  '/list',
-  '/file',
-  '/task'
-];
+// VS Code WebSocket 连接状态
+let vscodeWs: WebSocket | null = null;
+let vscodeConnected = false;
+
+// 内置命令，由 bot server 直接处理
+const builtinCommands = ['/start', '/help', '/auth', '/new', '/reset'];
 
 app.use(express.json());
 
-// Telegram webhook endpoint
-app.post('/webhook', async (req: Request, res: Response) => {
+// ========== 轮询模式 (无需 ngrok) ==========
+
+let lastUpdateId = 0;
+
+async function startPolling() {
+  console.log('启动轮询模式（无需公网URL）...');
+
+  // 先清除可能存在的 webhook
   try {
-    const update: TelegramMessage = req.body;
-
-    if (update.message && update.message.text) {
-      await handleTelegramMessage(update);
-    }
-
-    res.status(200).send('OK');
-  } catch (error) {
-    console.error('Error processing webhook:', error);
-    res.status(500).send('Error');
+    await axiosInstance.post(`${TELEGRAM_API_URL}/deleteWebhook`, { drop_pending_updates: false });
+  } catch (e) {
+    // 忽略
   }
+
+  while (true) {
+    try {
+      const res = await axiosInstance.get(`${TELEGRAM_API_URL}/getUpdates`, {
+        params: { offset: lastUpdateId + 1 },
+      });
+
+      if (!res.data.ok) continue;
+
+      for (const update of res.data.result) {
+        lastUpdateId = update.update_id;
+        console.log(`收到消息: ${update.message?.text || '[无文本]'}`);
+        if (update.message?.text) {
+          await handleTelegramMessage(update);
+        }
+      }
+    } catch (error: any) {
+      console.error('轮询错误:', error.code, error.message);
+    }
+    // 每秒轮询一次
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', vscodeConnected });
 });
+
+// ========== WebSocket Server (VS Code 连接) ==========
+
+const wss = new WebSocketServer({ port: Number(WS_PORT) });
+
+wss.on('connection', (ws: WebSocket) => {
+  console.log('VS Code extension 已连接');
+  vscodeWs = ws;
+  vscodeConnected = true;
+
+  ws.on('message', async (data: Buffer) => {
+    try {
+      const msg = JSON.parse(data.toString());
+
+      if (msg.type === 'response' && msg.chatId) {
+        await sendTelegramMessage(msg.chatId, msg.text);
+      } else if (msg.type === 'status' && msg.chatId) {
+        // 状态消息：短暂的思考提示，如果结果很快回来就不发这条
+        // 先跳过，避免刷屏
+      } else if (msg.type === 'ready') {
+        console.log(`VS Code 已就绪，工作区: ${msg.workspace || '未知'}`);
+      }
+    } catch (e) {
+      console.error('解析 VS Code 消息失败:', e);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('VS Code extension 断开连接');
+    vscodeWs = null;
+    vscodeConnected = false;
+  });
+
+  ws.on('error', (err) => {
+    console.error('WebSocket 错误:', err.message);
+    vscodeWs = null;
+    vscodeConnected = false;
+  });
+});
+
+// ========== 消息处理 ==========
 
 async function handleTelegramMessage(update: TelegramMessage) {
   if (!update.message) return;
 
   const userId = update.message.from.id;
-  const command = update.message.text?.trim() || '';
+  const text = update.message.text?.trim() || '';
   const chatId = update.message.chat.id;
 
-  // 检查用户是否被认证
-  const isAuthenticated = authenticatedUsers.has(userId);
-
-  let response: CommandResponse;
-
-  if (command.startsWith('/')) {
-    response = await processCommand({ userId, command, timestamp: Date.now() }, isAuthenticated);
-  } else {
-    response = {
-      success: false,
-      message: '请发送有效的命令。发送 /help 获取帮助信息。',
-    };
+  if (!text.startsWith('/')) {
+    // 自然语言消息 → 转发给 Claude Code
+    if (!authenticatedUsers.has(userId)) {
+      await sendTelegramMessage(chatId, '请先认证。发送 /auth 开始认证。');
+      return;
+    }
+    await forwardToClaude(chatId, text);
+    return;
   }
 
-  await sendMessage(chatId, response.message);
+  // 命令消息
+  const commandName = text.split(' ')[0].toLowerCase();
+
+  if (builtinCommands.includes(commandName)) {
+    const response = handleBuiltinCommand(commandName, userId);
+    await sendTelegramMessage(chatId, response.message);
+    return;
+  }
+
+  // 非内置命令 → 需要认证后转发给 Claude Code
+  if (!authenticatedUsers.has(userId)) {
+    await sendTelegramMessage(chatId, '请先认证。发送 /auth 开始认证。');
+    return;
+  }
+
+  // 即便是命令形式，也转发给 Claude Code 处理
+  await forwardToClaude(chatId, text);
 }
 
-async function processCommand(request: CommandRequest, isAuthenticated: boolean): Promise<CommandResponse> {
-  const { userId, command } = request;
-  const commandName = command.split(' ')[0];
-
-  // 验证命令是否在白名单中
-  if (!allowedCommands.includes(commandName)) {
-    return {
-      success: false,
-      message: `未授权的命令: ${commandName}. 请联系管理员。`,
-    };
-  }
-
-  // 一些命令不需要认证
-  if (['/start', '/help', '/auth'].includes(commandName)) {
-    return handleAuthCommand(commandName, userId);
-  }
-
-  // 其他命令需要认证
-  if (!isAuthenticated) {
-    return {
-      success: false,
-      message: '请先进行身份认证。发送 /auth 开始认证过程。',
-    };
-  }
-
-  // 处理认证后的命令
-  return handleAuthenticatedCommand(commandName, request);
-}
-
-function handleAuthCommand(commandName: string, userId: number): CommandResponse {
-  switch (commandName) {
+function handleBuiltinCommand(command: string, userId: number): CommandResponse {
+  switch (command) {
     case '/start':
       return {
         success: true,
-        message: '欢迎使用 VS Code 远程控制机器人！\n\n' +
-          '您可以使用以下命令：\n' +
-          '/auth - 开始身份认证\n' +
-          '/help - 显示帮助信息',
+        message:
+          '🤖 VS Code 远程控制机器人已启动\n\n' +
+          '发送 /auth 完成认证后，你就可以用自然语言让我控制 Claude Code 了。\n\n' +
+          '示例：\n' +
+          '"帮我在 src 下加一个 utils.ts"\n' +
+          '"修复 app.ts 里的类型错误"\n\n' +
+          '命令：\n' +
+          '/help - 帮助\n/auth - 认证\n/new - 开始新对话',
       };
 
     case '/help':
       return {
         success: true,
-        message: 'VS Code 远程控制机器人使用指南：\n\n' +
-          '基础命令：\n' +
-          '/start - 启动机器人\n' +
-          '/help - 显示此帮助\n' +
-          '/auth - 身份认证\n\n' +
-          '认证后可用命令：\n' +
-          '/run <file> - 运行代码文件\n' +
-          '/list - 列出可用任务\n' +
-          '/file <path> - 读取文件内容\n' +
-          '/task <name> - 执行VS Code任务',
+        message:
+          '📋 使用说明\n\n' +
+          '直接发送自然语言指令即可让 Claude Code 执行任务。\n\n' +
+          '内置命令：\n' +
+          '/start - 开始\n/help - 本帮助\n/auth - 身份认证\n/new - 清空上下文，开始新对话\n\n' +
+          '认证后，你说的每一句话都会发给 VS Code 里的 Claude Code。',
       };
 
     case '/auth':
-      // 实际应用中应该发送一个临时认证码到用户的VS Code或其他地方
       return {
         success: true,
-        message: '请在您的 VS Code 中打开认证页面以获取认证码。\n' +
-          '认证后您将能够远程控制 VS Code。',
+        message:
+          '🔐 认证流程：\n\n' +
+          '1. 在 VS Code 中按 Ctrl+Shift+P\n' +
+          '2. 运行 "Telegram Remote: Authenticate"\n' +
+          '3. 将显示的认证码发送到这里\n\n' +
+          '注意：认证码 5 分钟有效。',
       };
 
-    default:
+    case '/new':
+    case '/reset': {
+      // 通知 VS Code 重置对话
+      if (vscodeWs && vscodeWs.readyState === WebSocket.OPEN) {
+        vscodeWs.send(JSON.stringify({ type: 'reset' }));
+      }
       return {
-        success: false,
-        message: '无效的命令',
+        success: true,
+        message: '🆕 已开始新对话。之前的上下文已清除。',
       };
+    }
+
+    default:
+      return { success: false, message: '未知命令' };
   }
 }
 
-async function handleAuthenticatedCommand(commandName: string, request: CommandRequest): Promise<CommandResponse> {
-  const { userId, command, args } = request;
-
-  switch (commandName) {
-    case '/run':
-      // 解析文件路径
-      const filePath = command.split(' ').slice(1).join(' ');
-      if (!filePath) {
-        return {
-          success: false,
-          message: '请指定要运行的文件路径。用法: /run <file>',
-        };
-      }
-      return executeFile(filePath);
-
-    case '/list':
-      return listTasks();
-
-    case '/file':
-      const filePathRead = command.split(' ').slice(1).join(' ');
-      if (!filePathRead) {
-        return {
-          success: false,
-          message: '请指定要读取的文件路径。用法: /file <path>',
-        };
-      }
-      return readFileContent(filePathRead);
-
-    case '/task':
-      const taskName = command.split(' ').slice(1).join(' ');
-      if (!taskName) {
-        return {
-          success: false,
-          message: '请指定要执行的任务名称。用法: /task <name>',
-        };
-      }
-      return executeTask(taskName);
-
-    default:
-      return {
-        success: false,
-        message: '未实现的命令',
-      };
+async function forwardToClaude(chatId: number, message: string) {
+  if (!vscodeWs || vscodeWs.readyState !== WebSocket.OPEN) {
+    await sendTelegramMessage(
+      chatId,
+      '⚠️ VS Code 未连接。请确保：\n1. VS Code 已打开\n2. 扩展已激活\n3. Bot 服务器正在运行'
+    );
+    return;
   }
+
+  // 发一条状态消息
+  await sendTelegramMessage(chatId, '⏳');
+
+  // 转发给 VS Code
+  vscodeWs.send(JSON.stringify({
+    type: 'command',
+    chatId,
+    message,
+  }));
 }
 
-// 模拟执行文件
-async function executeFile(filePath: string): Promise<CommandResponse> {
-  // 这里应该是实际的VS Code任务执行逻辑
-  // 为了演示，我们只是返回一个模拟响应
-  return {
-    success: true,
-    message: `正在尝试运行文件: ${filePath}`,
-    output: `执行完成: ${filePath}\n这是模拟输出结果。\n在实际部署中，这里会显示真实的执行结果。`,
-  };
-}
+// ========== Telegram 消息发送 ==========
 
-// 模拟列出任务
-async function listTasks(): Promise<CommandResponse> {
-  // 这里应该是实际从VS Code获取任务列表的逻辑
-  return {
-    success: true,
-    message: '可用的VS Code任务：\n\n' +
-      '• build - 构建项目\n' +
-      '• test - 运行测试\n' +
-      '• debug - 调试模式\n' +
-      '• deploy - 部署项目',
-  };
-}
-
-// 模拟读取文件内容
-async function readFileContent(filePath: string): Promise<CommandResponse> {
-  // 这里应该是实际从VS Code读取文件的逻辑
-  return {
-    success: true,
-    message: `文件内容: ${filePath}`,
-    output: `// 这是 ${filePath} 的内容\nconsole.log("Hello from VS Code!");\n\n// 在实际部署中，这里会显示真实的文件内容`,
-  };
-}
-
-// 模拟执行任务
-async function executeTask(taskName: string): Promise<CommandResponse> {
-  // 这里应该是实际执行VS Code任务的逻辑
-  return {
-    success: true,
-    message: `正在执行任务: ${taskName}`,
-    output: `任务 ${taskName} 开始执行...\n执行中...\n任务完成！\n在实际部署中，这里会显示真实任务执行结果。`,
-  };
-}
-
-// 发送消息到Telegram
-async function sendMessage(chatId: number, text: string) {
+async function sendTelegramMessage(chatId: number, text: string) {
   try {
-    const chunks = splitMessage(text, 4096); // Telegram消息长度限制
+    const chunks = splitMessage(text, 4000);
 
     for (const chunk of chunks) {
-      await axios.post(`${TELEGRAM_API_URL}/sendMessage`, {
+      await axiosInstance.post(`${TELEGRAM_API_URL}/sendMessage`, {
         chat_id: chatId,
         text: chunk,
-        parse_mode: 'Markdown',
+        // plain text 模式，避免 Markdown 特殊字符导致发送失败
       });
     }
-  } catch (error) {
-    console.error('Error sending message:', error);
+  } catch (error: any) {
+    console.error('发送 Telegram 消息失败:', error?.response?.data || error.message);
   }
 }
 
-// 分割长消息
 function splitMessage(text: string, maxLength: number): string[] {
-  if (text.length <= maxLength) {
-    return [text];
-  }
+  if (text.length <= maxLength) return [text];
 
   const chunks: string[] = [];
-  let currentChunk = '';
+  let current = '';
 
-  const lines = text.split('\n');
-
-  for (const line of lines) {
-    if (currentChunk.length + line.length + 1 <= maxLength) {
-      currentChunk += (currentChunk ? '\n' : '') + line;
+  for (const line of text.split('\n')) {
+    if (current.length + line.length + 1 <= maxLength) {
+      current += (current ? '\n' : '') + line;
     } else {
-      if (currentChunk) {
-        chunks.push(currentChunk);
-      }
-      currentChunk = line;
-
-      // 如果单行超过限制，则按字符分割
-      if (currentChunk.length > maxLength) {
-        const lineChunks = currentChunk.match(new RegExp(`.{1,${maxLength}}`, 'g')) || [];
-        if (lineChunks.length > 0) {
-          currentChunk = lineChunks.pop()!;
-          chunks.push(...lineChunks);
+      if (current) chunks.push(current);
+      current = line;
+      if (current.length > maxLength) {
+        while (current.length > maxLength) {
+          chunks.push(current.slice(0, maxLength));
+          current = current.slice(maxLength);
         }
       }
     }
   }
-
-  if (currentChunk) {
-    chunks.push(currentChunk);
-  }
-
+  if (current) chunks.push(current);
   return chunks;
 }
 
-// 模拟认证用户
-function authenticateUser(userId: number) {
-  authenticatedUsers.add(userId);
-  console.log(`User ${userId} authenticated`);
-}
+// ========== 认证处理 ==========
 
-// 启动服务器
-app.listen(PORT, () => {
-  console.log(`Bot server running on port ${PORT}`);
-  console.log(`Webhook URL: http://localhost:${PORT}/webhook`);
+// 用户发送的认证码（格式：/auth CODE 或直接发认证码）
+app.post('/internal/authenticate', (req: Request, res: Response) => {
+  const { userId } = req.body;
+  if (userId) {
+    authenticatedUsers.add(userId);
+    console.log(`用户 ${userId} 已认证`);
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ success: false });
+  }
+});
+
+// ========== 启动 ==========
+
+app.listen(HTTP_PORT, () => {
+  console.log(`Bot server 运行在 http://localhost:${HTTP_PORT}`);
+  console.log(`WebSocket 等待 VS Code 连接: ws://localhost:${WS_PORT}`);
+  console.log(`内置命令: ${builtinCommands.join(', ')}`);
+  startPolling();
 });
