@@ -1,3 +1,9 @@
+---
+title: Telegram VSCode 远程控制系统 - 完成设置指南
+description: Telegram VSCode 远程控制系统完成设置的最终步骤指南。
+tags: [telegram, vscode, setup, completion-guide]
+---
+
 # Telegram VSCode 远程控制系统 - 完成设置指南
 
 ## 状态检查

@@ -1,3 +1,9 @@
+---
+title: 一键部署说明
+description: Telegram VSCode 远程控制系统的一键部署说明。
+tags: [telegram, vscode, deployment]
+---
+
 # 一键部署说明
 
 ## 文件说明

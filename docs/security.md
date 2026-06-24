@@ -1,3 +1,9 @@
+---
+title: 安全策略
+description: Telegram 机器人与 VS Code 集成系统的安全策略文档。
+tags: [security, telegram, vscode, authentication, authorization]
+---
+
 # 安全策略
 
 本系统采用多层安全措施保护用户数据和系统安全。

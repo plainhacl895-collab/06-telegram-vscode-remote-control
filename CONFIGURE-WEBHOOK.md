@@ -1,3 +1,9 @@
+---
+title: 配置 Telegram Webhook 指南
+description: Telegram VSCode 远程控制系统的 Webhook 配置指南。
+tags: [telegram, webhook, configuration]
+---
+
 # 配置Telegram Webhook指南
 
 ## 第一步：获取公共URL

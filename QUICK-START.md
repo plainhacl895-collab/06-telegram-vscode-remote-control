@@ -1,3 +1,9 @@
+---
+title: 快速启动指南
+description: Telegram VSCode 远程控制系统的快速启动指南。
+tags: [telegram, vscode, quick-start]
+---
+
 # 快速启动指南
 
 ## 一行命令启动系统

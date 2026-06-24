@@ -1,3 +1,9 @@
+---
+title: 安装和部署指南
+description: Telegram VSCode 远程控制系统的安装和部署指南。
+tags: [telegram, vscode, installation, deployment]
+---
+
 # 安装和部署指南
 
 本文档详细说明如何安装和部署Telegram VSCode远程控制系统。

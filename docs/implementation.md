@@ -1,3 +1,9 @@
+---
+title: 详细实现说明
+description: Telegram 机器人与 VS Code 集成系统的具体实现说明文档。
+tags: [implementation, telegram, vscode, bot-server, extension]
+---
+
 # 详细实现说明
 
 本文档详细说明Telegram机器人与VS Code集成系统的具体实现方式。

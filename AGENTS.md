@@ -1,12 +1,12 @@
 ---
-title: Telegram VSCode Remote Control - CLAUDE.md
+title: Telegram VSCode Remote Control - AGENTS.md
 description: 通过 Telegram 机器人远程控制 VS Code 任务执行的系统，包含 Bot Server、VS Code Extension 和共享类型定义。
 tags: [telegram, vscode, remote-control, bot, extension, typescript]
 ---
 
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 

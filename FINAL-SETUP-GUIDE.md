@@ -1,3 +1,9 @@
+---
+title: Telegram VSCode 远程控制系统 - 完整部署指南
+description: Telegram VSCode 远程控制系统完整部署指南，包含 ngrok、webhook 和 VS Code 扩展配置。
+tags: [telegram, vscode, deployment, setup, guide]
+---
+
 # Telegram VSCode 远程控制系统 - 完整部署指南
 
 ## 状态摘要

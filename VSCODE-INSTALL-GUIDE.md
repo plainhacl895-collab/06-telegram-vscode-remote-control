@@ -1,3 +1,9 @@
+---
+title: VS Code 扩展安装指南
+description: Telegram VSCode 远程控制系统的 VS Code 扩展安装指南。
+tags: [vscode, extension, installation]
+---
+
 # VS Code扩展安装指南
 
 ## 安装VS Code扩展

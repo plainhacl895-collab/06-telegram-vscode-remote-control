@@ -1,3 +1,9 @@
+---
+title: Telegram VSCode Remote Control - 使用指南
+description: 通过 Telegram 机器人远程控制 VS Code 任务执行的系统使用指南。
+tags: [telegram, vscode, remote-control, usage]
+---
+
 # Telegram VSCode Remote Control
 
 一个允许您通过Telegram机器人远程控制VS Code任务执行的系统。

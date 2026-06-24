@@ -1,3 +1,9 @@
+---
+title: 系统架构设计
+description: Telegram 机器人与 VS Code 集成系统的整体架构设计文档。
+tags: [architecture, telegram, vscode, design]
+---
+
 # 系统架构设计
 
 本文档描述了Telegram机器人与VS Code集成系统的整体架构设计。

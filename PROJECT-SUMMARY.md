@@ -1,3 +1,9 @@
+---
+title: Telegram VSCode 远程控制系统 - 项目总结
+description: Telegram VSCode 远程控制系统项目总结，包含系统架构、已完成工作和剩余配置步骤。
+tags: [telegram, vscode, remote-control, project-summary]
+---
+
 # Telegram VSCode 远程控制系统 - 项目总结
 
 ## 项目概述

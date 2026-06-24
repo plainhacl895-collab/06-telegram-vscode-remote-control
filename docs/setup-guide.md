@@ -1,3 +1,9 @@
+---
+title: 安装配置指南
+description: Telegram 机器人与 VS Code 集成环境的安装配置指南。
+tags: [setup, installation, telegram, vscode]
+---
+
 # 安装配置指南
 
 本指南将帮助您设置Telegram机器人与VS Code的集成环境。
